@@ -195,7 +195,19 @@ export class ShellExecutionService {
             shellExecutionConfig,
             ptyInfo,
           );
-        } catch (_e) {
+        } catch (e) {
+          const err = e as Error;
+          const message = err.message || '';
+          if (
+            message.includes('could not find the binary package') ||
+            message.includes('optionalDependencies')
+          ) {
+            onOutputEvent({
+              type: 'data',
+              chunk:
+                '[GEMINI_CLI_WARNING] PTY unavailable (optional dependencies may be omitted). Using child_process.\n',
+            });
+          }
           // Fallback to child_process
         }
       }
@@ -748,28 +760,37 @@ export class ShellExecutionService {
       return { pid: ptyProcess.pid, result };
     } catch (e) {
       const error = e as Error;
-      if (error.message.includes('posix_spawnp failed')) {
+      const msg = error.message || '';
+      if (msg.includes('posix_spawnp failed')) {
         onOutputEvent({
           type: 'data',
           chunk:
             '[GEMINI_CLI_WARNING] PTY execution failed, falling back to child_process. This may be due to sandbox restrictions.\n',
         });
         throw e;
-      } else {
-        return {
-          pid: undefined,
-          result: Promise.resolve({
-            error,
-            rawOutput: Buffer.from(''),
-            output: '',
-            exitCode: 1,
-            signal: null,
-            aborted: false,
-            pid: undefined,
-            executionMethod: 'none',
-          }),
-        };
       }
+      // Missing pty binary (e.g. --omit=optional on Windows): re-throw so caller falls back to child_process
+      if (
+        msg.includes('could not find the binary package') ||
+        msg.includes('optionalDependencies') ||
+        msg.includes('--omit=optional') ||
+        msg.includes('--no-optional')
+      ) {
+        throw e;
+      }
+      return {
+        pid: undefined,
+        result: Promise.resolve({
+          error,
+          rawOutput: Buffer.from(''),
+          output: '',
+          exitCode: 1,
+          signal: null,
+          aborted: false,
+          pid: undefined,
+          executionMethod: 'none',
+        }),
+      };
     }
   }
 

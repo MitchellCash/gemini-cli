@@ -1587,4 +1587,42 @@ describe('ShellExecutionService environment variables', () => {
     mockChildProcess.emit('close', 0, null);
     await new Promise(process.nextTick);
   });
+
+  it('should fall back to child_process when pty binary is missing', async () => {
+    const ptyError = new Error(
+      'The @lydell/node-pty package supports your platform (win32-x64), but it could not find the binary package for it: @lydell/node-pty-win32-x64/conpty.node',
+    );
+    mockPtySpawn.mockImplementation(() => {
+      throw ptyError;
+    });
+
+    const onOutputEventMock = vi.fn();
+    const handle = await ShellExecutionService.execute(
+      'test-fallback-command',
+      '/',
+      onOutputEventMock,
+      new AbortController().signal,
+      true,
+      shellExecutionConfig,
+    );
+
+    // Should have called pty spawn first
+    expect(mockPtySpawn).toHaveBeenCalled();
+
+    // Should have emitted a warning
+    expect(onOutputEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'data',
+        chunk: expect.stringContaining('[GEMINI_CLI_WARNING] PTY unavailable'),
+      }),
+    );
+
+    // Should have called child_process spawn as fallback
+    expect(mockCpSpawn).toHaveBeenCalled();
+
+    // Ensure child_process exits
+    mockChildProcess.emit('exit', 0, null);
+    mockChildProcess.emit('close', 0, null);
+    await handle.result;
+  });
 });
